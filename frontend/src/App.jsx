@@ -672,7 +672,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                 {n.lk && <text x={n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>🔗</text>}
                 {n.nt && <text x={n.lk?n.w-19:n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>💬</text>}
               </g>
-            )})
+            )})}
             {/* Animação de origem de conexão */}
             {cf && nd[cf] && (
               <circle cx={nd[cf].x+nd[cf].w/2} cy={nd[cf].y+totalH(nd[cf])/2} r="8" fill="none" stroke="#F5C16C" strokeWidth="2">
