@@ -7,17 +7,21 @@ const FONTS = ['Poppins','Georgia','Courier New','Trebuchet MS','Impact']
 const BGS = ['#0d0d14','#1a1a2e','#0f2027','#f4f4f0','#1e293b','#2a1b3d']
 const TOKEN_KEY = 'mm_token'
 const USER_KEY  = 'mm_user'
+const IMG_H     = 80  // altura da imagem dentro do nó
 
 function curve(x1,y1,x2,y2) {
   const mx = (x1+x2)/2
   return `M${x1} ${y1} C${mx} ${y1},${mx} ${y2},${x2} ${y2}`
 }
 
+// Altura total do nó (com ou sem imagem)
+const totalH = (n) => n.img ? IMG_H + n.h : n.h
+
 const INIT_MAP = () => ({
   nodes: {
-    r: {id:'r',text:'Meu Mapa',x:-75,y:-22,w:150,h:44,bg:'#4DD4C1',fg:'#fff',fs:17,ff:'Poppins',p:null,ch:['a','b'],lk:'',nt:''},
-    a: {id:'a',text:'Tópico 1', x:195,y:-82,w:130,h:42,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:''},
-    b: {id:'b',text:'Tópico 2', x:195,y: 52,w:130,h:42,bg:'#45B7D1',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:''},
+    r: {id:'r',text:'Meu Mapa',x:-75,y:-22,w:150,h:44,bg:'#4DD4C1',fg:'#fff',fs:17,ff:'Poppins',p:null,ch:['a','b'],lk:'',nt:'',img:''},
+    a: {id:'a',text:'Tópico 1', x:195,y:-82,w:130,h:42,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:''},
+    b: {id:'b',text:'Tópico 2', x:195,y: 52,w:130,h:42,bg:'#45B7D1',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:''},
   },
   xs: [],
 })
@@ -44,6 +48,15 @@ const api = {
   updateMap:(id,data)        => api.req('PUT', `/maps/${id}`,   data),
   deleteMap:(id)             => api.req('DELETE',`/maps/${id}`),
   share:    (id,action)      => api.req('POST',`/maps/${id}/share`,{action}),
+  uploadImg: (mapId, file)  => {
+    const fd = new FormData()
+    fd.append('image', file)
+    return fetch(`/api/maps/${mapId}/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${api.tok()}` },
+      body: fd
+    }).then(r => r.json())
+  },
 }
 
 // ─── Estilos compartilhados ────────────────────────────────
@@ -273,11 +286,13 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const [saved, setSaved]     = useState(true)
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState(null)
+  const [uploading, setUploading] = useState(false)
 
   const svgRef    = useRef(null)
   const editRef   = useRef(null)
   const saveTimer = useRef(null)
   const titleRef  = useRef(mapTitle)
+  const imgInputRef = useRef(null)
 
   // ── Carregar mapa ────────────────────────────────────
   useEffect(() => {
@@ -342,7 +357,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     setNd(n=>({
       ...n,
       [id]: {id,text:'Novo nó',x:p.x+p.w+90,y:p.y+(i-(i>>1))*74,w:120,h:40,
-              bg:PAL[i%PAL.length],fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:''},
+              bg:PAL[i%PAL.length],fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:''},
       [pid]: {...n[pid], ch:[...n[pid].ch, id]}
     }))
     setSel(id); setEdit(id); setEv('Novo nó')
@@ -481,6 +496,18 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     } catch(e) { alert(e.message) }
   }
 
+  // ── Upload de imagem ─────────────────────────────────
+  const uploadImage = async (file) => {
+    if (!file || !sel) return
+    setUploading(true)
+    try {
+      const r = await api.uploadImg(mapId, file)
+      snap()
+      upd(sel, { img: r.url })
+    } catch(e) { alert('Erro ao fazer upload: ' + e.message) }
+    finally    { setUploading(false) }
+  }
+
   if (loading || !nd) return (
     <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',
       background:'#0d0d14',color:'rgba(255,255,255,.3)',fontFamily:'Poppins,sans-serif',fontSize:14}}>
@@ -493,8 +520,9 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   Object.values(nd).forEach(n => {
     if (!n.p || !nd[n.p]) return
     const p=nd[n.p], toR=n.x>=p.x
+    const ph = totalH(p), nh = totalH(n)
     edges.push(<path key={`e${n.id}`}
-      d={curve(toR?p.x+p.w:p.x, p.y+p.h/2, toR?n.x:n.x+n.w, n.y+n.h/2)}
+      d={curve(toR?p.x+p.w:p.x, p.y+ph/2, toR?n.x:n.x+n.w, n.y+nh/2)}
       stroke={n.bg} strokeWidth="2.5" fill="none" strokeOpacity=".75"
       style={{pointerEvents:'none'}}
     />)
@@ -502,7 +530,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   xs.forEach(x => {
     const a=nd[x.from], b=nd[x.to]; if(!a||!b) return
     edges.push(<path key={`x${x.id}`}
-      d={curve(a.x+a.w/2,a.y+a.h/2,b.x+b.w/2,b.y+b.h/2)}
+      d={curve(a.x+a.w/2,a.y+totalH(a)/2,b.x+b.w/2,b.y+totalH(b)/2)}
       stroke="#F5C16C" strokeWidth="2" strokeDasharray="7 3" fill="none"
       style={{cursor:'pointer'}}
       onClick={()=>{ snap(); setXs(cur=>cur.filter(e=>e.id!==x.id)) }}
@@ -587,21 +615,37 @@ function MapEditor({ mapId, mapTitle, onBack }) {
           <rect width="100%" height="100%" fill="url(#gdots)"/>
           <g transform={`translate(${vp.x},${vp.y}) scale(${vp.s})`}>
             {edges}
-            {Object.values(nd).map(n=>(
+            {Object.values(nd).map(n=>{
+              const th = totalH(n)
+              return (
               <g key={n.id} transform={`translate(${n.x},${n.y})`}
                 onMouseDown={e=>onNdDown(e,n.id)}
                 onDoubleClick={e=>onDbl(e,n.id)}
                 onContextMenu={e=>{e.preventDefault();e.stopPropagation();setCtx({x:e.clientX,y:e.clientY,id:n.id});setSel(n.id)}}
                 style={{cursor:tool==='con'?'crosshair':'move'}}>
+                <defs>
+                  <clipPath id={`cp${n.id}`}>
+                    <rect rx="11" width={n.w} height={th}/>
+                  </clipPath>
+                </defs>
                 {/* Sombra */}
-                <rect x="3" y="5" rx="11" width={n.w} height={n.h} fill="rgba(0,0,0,.3)" style={{pointerEvents:'none'}}/>
-                {/* Nó */}
-                <rect rx="11" width={n.w} height={n.h} fill={n.bg}
+                <rect x="3" y="5" rx="11" width={n.w} height={th} fill="rgba(0,0,0,.3)" style={{pointerEvents:'none'}}/>
+                {/* Fundo do nó */}
+                <rect rx="11" width={n.w} height={th} fill={n.bg}
                   stroke={sel===n.id?'rgba(255,255,255,.9)':'rgba(255,255,255,.12)'}
                   strokeWidth={sel===n.id?2.5:1}/>
+                {/* Imagem (se houver) */}
+                {n.img && <>
+                  <image href={n.img} x="0" y="0" width={n.w} height={IMG_H}
+                    preserveAspectRatio="xMidYMid slice"
+                    clipPath={`url(#cp${n.id})`}
+                    style={{pointerEvents:'none'}}/>
+                  <line x1="0" y1={IMG_H} x2={n.w} y2={IMG_H}
+                    stroke="rgba(0,0,0,.25)" strokeWidth="1" style={{pointerEvents:'none'}}/>
+                </>}
                 {/* Texto ou input de edição */}
                 {edit===n.id
-                  ? <foreignObject x="7" y="5" width={n.w-14} height={n.h-10}>
+                  ? <foreignObject x="7" y={n.img?IMG_H+4:5} width={n.w-14} height={n.h-10}>
                       <input ref={editRef} xmlns="http://www.w3.org/1999/xhtml"
                         style={{width:'100%',height:'100%',border:'none',outline:'none',
                           background:'transparent',color:n.fg,fontSize:n.fs,
@@ -617,20 +661,21 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                         onClick={e=>e.stopPropagation()}
                       />
                     </foreignObject>
-                  : <text x={n.w/2} y={n.h/2} textAnchor="middle" dominantBaseline="central"
+                  : <text x={n.w/2} y={n.img ? IMG_H+n.h/2 : n.h/2}
+                      textAnchor="middle" dominantBaseline="central"
                       fill={n.fg} fontSize={n.fs} fontFamily={n.ff} fontWeight="600"
                       style={{pointerEvents:'none',userSelect:'none'}}>
                       {truncate(n)}
                     </text>
                 }
-                {/* Indicadores de link e nota */}
+                {/* Indicadores */}
                 {n.lk && <text x={n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>🔗</text>}
                 {n.nt && <text x={n.lk?n.w-19:n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>💬</text>}
               </g>
-            ))}
+            )})
             {/* Animação de origem de conexão */}
             {cf && nd[cf] && (
-              <circle cx={nd[cf].x+nd[cf].w/2} cy={nd[cf].y+nd[cf].h/2} r="8" fill="none" stroke="#F5C16C" strokeWidth="2">
+              <circle cx={nd[cf].x+nd[cf].w/2} cy={nd[cf].y+totalH(nd[cf])/2} r="8" fill="none" stroke="#F5C16C" strokeWidth="2">
                 <animate attributeName="r" values="8;22;8" dur=".8s" repeatCount="indefinite"/>
                 <animate attributeName="stroke-opacity" values="1;0;1" dur=".8s" repeatCount="indefinite"/>
               </circle>
@@ -700,6 +745,24 @@ function MapEditor({ mapId, mapTitle, onBack }) {
             <textarea style={{...S.panelInput,resize:'vertical',minHeight:54}}
               value={sn.nt||''} placeholder="Suas anotações..."
               onChange={e=>upd(sel,{nt:e.target.value})}/>
+
+            <PL>🖼️ Imagem do nó</PL>
+            {sn.img && (
+              <div style={{marginBottom:8,position:'relative'}}>
+                <img src={sn.img} alt="" style={{width:'100%',height:70,objectFit:'cover',borderRadius:8,display:'block'}}/>
+                <button onClick={()=>{snap();upd(sel,{img:''})}}
+                  style={{position:'absolute',top:4,right:4,background:'rgba(0,0,0,.75)',border:'none',
+                    color:'#fff',borderRadius:5,padding:'2px 8px',cursor:'pointer',fontSize:11}}>
+                  ✕ Remover
+                </button>
+              </div>
+            )}
+            <input ref={imgInputRef} type="file" accept="image/*" style={{display:'none'}}
+              onChange={e=>{if(e.target.files[0]) uploadImage(e.target.files[0]); e.target.value='';}}/>
+            <button style={{...S.panelBtn(false),width:'100%',marginBottom:10,opacity:uploading?.6:1}}
+              disabled={uploading} onClick={()=>imgInputRef.current?.click()}>
+              {uploading?'⏳ Enviando...':'📁 Escolher imagem'}
+            </button>
 
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5}}>
               <button style={S.panelBtn(false)} onClick={()=>addChild(sel)}>➕ Filho</button>
