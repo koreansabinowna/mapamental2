@@ -287,6 +287,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [previewImg, setPreviewImg] = useState(null)
 
   const svgRef    = useRef(null)
   const editRef   = useRef(null)
@@ -459,11 +460,14 @@ function MapEditor({ mapId, mapTitle, onBack }) {
       if (e.key==='Tab'   && sel && !edit) { e.preventDefault(); addChild(sel) }
       if (e.key==='Enter' && sel && !edit) { e.preventDefault(); addSib(sel)   }
       if ((e.key==='Delete'||e.key==='Backspace') && sel && !edit) del(sel)
-      if (e.key==='Escape') { setEdit(null); setCtx(null); setCf(null); setTool('sel') }
+      if (e.key==='Escape') {
+        if (previewImg) { setPreviewImg(null); return }
+        setEdit(null); setCtx(null); setCf(null); setTool('sel')
+      }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [sel, edit, undo, redo, addChild, addSib, del])
+  }, [sel, edit, undo, redo, addChild, addSib, del, previewImg])
 
   // ── Exportar JPG ──────────────────────────────────────
   const exportJPG = () => {
@@ -639,7 +643,8 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                   <image href={n.img} x="0" y="0" width={n.w} height={IMG_H}
                     preserveAspectRatio="xMidYMid slice"
                     clipPath={`url(#cp${n.id})`}
-                    style={{pointerEvents:'none'}}/>
+                    style={{pointerEvents:'all', cursor:'zoom-in'}}
+                    onClick={e=>{e.stopPropagation(); setPreviewImg(n.img)}}/>
                   <line x1="0" y1={IMG_H} x2={n.w} y2={IMG_H}
                     stroke="rgba(0,0,0,.25)" strokeWidth="1" style={{pointerEvents:'none'}}/>
                 </>}
@@ -825,6 +830,32 @@ function MapEditor({ mapId, mapTitle, onBack }) {
             borderRadius:22,fontWeight:700,fontSize:13,whiteSpace:'nowrap',
             boxShadow:'0 4px 20px rgba(245,193,108,.3)'}}>
             🔗 {cf ? `De: "${nd[cf]?.text}" → clique no nó destino` : 'Clique no nó de origem'} &nbsp;·&nbsp; ESC para cancelar
+          </div>
+        )}
+
+        {/* ── Modal de preview de imagem ───────────── */}
+        {previewImg && (
+          <div onClick={()=>setPreviewImg(null)}
+            style={{position:'fixed',inset:0,zIndex:99999,
+              background:'rgba(0,0,0,.88)',display:'flex',
+              alignItems:'center',justifyContent:'center',
+              cursor:'zoom-out',backdropFilter:'blur(6px)'}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{position:'relative',maxWidth:'90vw',maxHeight:'90vh'}}>
+              <img src={previewImg} alt=""
+                style={{maxWidth:'90vw',maxHeight:'88vh',borderRadius:12,
+                  display:'block',boxShadow:'0 20px 60px rgba(0,0,0,.6)',
+                  objectFit:'contain'}}/>
+              <button onClick={()=>setPreviewImg(null)}
+                style={{position:'absolute',top:-14,right:-14,width:32,height:32,
+                  background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.2)',
+                  color:'#fff',borderRadius:'50%',cursor:'pointer',
+                  fontSize:16,display:'flex',alignItems:'center',justifyContent:'center',
+                  backdropFilter:'blur(8px)'}}>✕</button>
+              <div style={{textAlign:'center',marginTop:10,color:'rgba(255,255,255,.4)',fontSize:12}}>
+                Clique fora ou pressione ESC para fechar
+              </div>
+            </div>
           </div>
         )}
       </div>
