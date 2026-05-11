@@ -17,6 +17,35 @@ function curve(x1,y1,x2,y2) {
 // Altura total do nó (com ou sem imagem)
 const totalH = (n) => n.img ? IMG_H + n.h : n.h
 
+// Quebra texto em linhas respeitando largura do nó
+function computeLines(text, nodeW, fontSize) {
+  const charW = fontSize * 0.58
+  const maxChars = Math.max(4, Math.floor((nodeW - 24) / charW))
+  const words = text.split(' ')
+  const lines = []
+  let cur = ''
+  for (const word of words) {
+    const test = cur ? cur + ' ' + word : word
+    if (test.length <= maxChars) {
+      cur = test
+    } else {
+      if (cur) lines.push(cur)
+      if (word.length > maxChars) {
+        let w = word
+        while (w.length > maxChars) { lines.push(w.slice(0, maxChars)); w = w.slice(maxChars) }
+        cur = w
+      } else { cur = word }
+    }
+  }
+  if (cur) lines.push(cur)
+  return lines.length ? lines : [text]
+}
+
+// Calcula altura ideal para o número de linhas
+function autoHeight(lines, fontSize) {
+  return Math.max(36, lines.length * (fontSize + 10) + 14)
+}
+
 const INIT_MAP = () => ({
   nodes: {
     r: {id:'r',text:'Meu Mapa',x:-75,y:-22,w:150,h:44,bg:'#4DD4C1',fg:'#fff',fs:17,ff:'Poppins',p:null,ch:['a','b'],lk:'',nt:'',img:''},
@@ -282,6 +311,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const [fut, setFut]     = useState([])
   const [drag, setDrag]   = useState(null)
   const [pan, setPan]     = useState(null)
+  const [resize, setResize] = useState(null) // {id, dir, sx, sy, ow, oh}
   const [saving, setSaving]   = useState(false)
   const [saved, setSaved]     = useState(true)
   const [loading, setLoading] = useState(true)
@@ -386,7 +416,11 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const finEdit = useCallback(() => {
     if (!edit) return
     snap()
-    upd(edit, {text: ev.trim() || nd[edit]?.text || '?'})
+    const newText = ev.trim() || nd[edit]?.text || '?'
+    const n = nd[edit]
+    const lines = computeLines(newText, n.w, n.fs)
+    const newH = autoHeight(lines, n.fs)
+    upd(edit, {text: newText, h: newH})
     setEdit(null)
   }, [edit, ev, nd, snap])
 
@@ -421,7 +455,20 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   }
 
   const onMove = (e) => {
-    if (drag) {
+    if (resize) {
+      const dx=(e.clientX-resize.sx)/vp.s, dy=(e.clientY-resize.sy)/vp.s
+      const updates = {}
+      if (resize.dir==='w') {
+        // Left handle: increase width to left, move x
+        const newW = Math.max(70, Math.round(resize.ow - dx))
+        updates.w = newW
+        updates.x = resize.ox + (resize.ow - newW)
+      } else {
+        if (resize.dir.includes('e')) updates.w = Math.max(70, Math.round(resize.ow + dx))
+        if (resize.dir.includes('s')) updates.h = Math.max(30, Math.round(resize.oh + dy))
+      }
+      upd(resize.id, updates)
+    } else if (drag) {
       const dx=(e.clientX-drag.sx)/vp.s, dy=(e.clientY-drag.sy)/vp.s
       upd(drag.id, {x:drag.ox+dx, y:drag.oy+dy})
     } else if (pan) {
@@ -430,8 +477,9 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   }
 
   const onUp = () => {
-    if (drag) { snap(); setDrag(null) }
-    if (pan)  setPan(null)
+    if (resize) { snap(); setResize(null) }
+    if (drag)   { snap(); setDrag(null) }
+    if (pan)    setPan(null)
   }
 
   const onWheel = (e) => {
@@ -543,10 +591,48 @@ function MapEditor({ mapId, mapTitle, onBack }) {
 
   const sn = sel ? nd[sel] : null
 
-  // ── Truncar texto no nó ───────────────────────────────
-  const truncate = (n) => {
-    const max = Math.floor(n.w/(n.fs*.58))
-    return n.text.length>max ? n.text.slice(0,max-1)+'…' : n.text
+  // ── Renderiza texto com quebra de linha automática ────
+  const renderText = (n, imgOffset) => {
+    const lines = computeLines(n.text, n.w, n.fs)
+    const lineH  = n.fs + 10
+    const totalTxtH = lines.length * lineH
+    const baseY = imgOffset + (n.h - totalTxtH) / 2 + n.fs * 0.8
+    return (
+      <text x={n.w/2} y={baseY} textAnchor="middle"
+        fill={n.fg} fontSize={n.fs} fontFamily={n.ff} fontWeight="600"
+        style={{pointerEvents:'none',userSelect:'none'}}>
+        {lines.map((line, i) => (
+          <tspan key={i} x={n.w/2} dy={i===0 ? 0 : lineH}>{line}</tspan>
+        ))}
+      </text>
+    )
+  }
+
+  // ── Alças de redimensionamento ────────────────────────
+  const renderHandles = (n) => {
+    const th = totalH(n)
+    const hs = 10  // handle size
+    const hh = 6   // half
+    return (
+      <g style={{pointerEvents:'all'}}>
+        {/* Direita */}
+        <rect x={n.w-hh} y={th/2-hs} width={hs+2} height={hs*2} rx={3}
+          fill="white" stroke="#4DD4C1" strokeWidth={1.5} style={{cursor:'ew-resize'}}
+          onMouseDown={e=>{e.stopPropagation();setResize({id:n.id,dir:'e',sx:e.clientX,sy:e.clientY,ow:n.w,oh:n.h})}}/>
+        {/* Baixo */}
+        <rect x={n.w/2-hs} y={th-hh} width={hs*2} height={hs+2} rx={3}
+          fill="white" stroke="#4DD4C1" strokeWidth={1.5} style={{cursor:'ns-resize'}}
+          onMouseDown={e=>{e.stopPropagation();setResize({id:n.id,dir:'s',sx:e.clientX,sy:e.clientY,ow:n.w,oh:n.h})}}/>
+        {/* Canto inferior direito */}
+        <rect x={n.w-hh} y={th-hh} width={hs+4} height={hs+4} rx={3}
+          fill="#4DD4C1" stroke="white" strokeWidth={1.5} style={{cursor:'nwse-resize'}}
+          onMouseDown={e=>{e.stopPropagation();setResize({id:n.id,dir:'se',sx:e.clientX,sy:e.clientY,ow:n.w,oh:n.h})}}/>
+        {/* Esquerda */}
+        <rect x={-hh} y={th/2-hs} width={hs+2} height={hs*2} rx={3}
+          fill="white" stroke="#4DD4C1" strokeWidth={1.5} style={{cursor:'ew-resize'}}
+          onMouseDown={e=>{e.stopPropagation();setResize({id:n.id,dir:'w',sx:e.clientX,sy:e.clientY,ow:n.w,oh:n.h,ox:n.x})}}/>
+      </g>
+    )
   }
 
   return (
@@ -666,16 +752,13 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                         onClick={e=>e.stopPropagation()}
                       />
                     </foreignObject>
-                  : <text x={n.w/2} y={n.img ? IMG_H+n.h/2 : n.h/2}
-                      textAnchor="middle" dominantBaseline="central"
-                      fill={n.fg} fontSize={n.fs} fontFamily={n.ff} fontWeight="600"
-                      style={{pointerEvents:'none',userSelect:'none'}}>
-                      {truncate(n)}
-                    </text>
+                  : renderText(n, n.img ? IMG_H : 0)
                 }
                 {/* Indicadores */}
                 {n.lk && <text x={n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>🔗</text>}
                 {n.nt && <text x={n.lk?n.w-19:n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>💬</text>}
+                {/* Alças de redimensionamento (apenas no nó selecionado) */}
+                {sel===n.id && renderHandles(n)}
               </g>
             )})}
             {/* Animação de origem de conexão */}
@@ -705,7 +788,11 @@ function MapEditor({ mapId, mapTitle, onBack }) {
 
             <PL>Tamanho: {sn.fs}px</PL>
             <input type="range" min="10" max="34" value={sn.fs}
-              onChange={e=>upd(sel,{fs:+e.target.value})}
+              onChange={e=>{
+                const fs=+e.target.value
+                const lines=computeLines(sn.text,sn.w,fs)
+                upd(sel,{fs, h:autoHeight(lines,fs)})
+              }}
               style={{width:'100%',accentColor:'#4DD4C1',marginBottom:8}}/>
 
             <PL>Fonte</PL>
@@ -713,10 +800,24 @@ function MapEditor({ mapId, mapTitle, onBack }) {
               {FONTS.map(f=><option key={f} value={f}>{f}</option>)}
             </select>
 
-            <PL>Largura: {sn.w}px</PL>
-            <input type="range" min="70" max="280" value={sn.w}
-              onChange={e=>upd(sel,{w:+e.target.value})}
-              style={{width:'100%',accentColor:'#4DD4C1',marginBottom:8}}/>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:0}}>
+              <div>
+                <PL>Largura: {sn.w}px</PL>
+                <input type="range" min="70" max="400" value={sn.w}
+                  onChange={e=>{
+                    const w=+e.target.value
+                    const lines=computeLines(sn.text,w,sn.fs)
+                    upd(sel,{w, h:autoHeight(lines,sn.fs)})
+                  }}
+                  style={{width:'100%',accentColor:'#4DD4C1',marginBottom:8}}/>
+              </div>
+              <div>
+                <PL>Altura: {sn.h}px</PL>
+                <input type="range" min="30" max="300" value={sn.h}
+                  onChange={e=>upd(sel,{h:+e.target.value})}
+                  style={{width:'100%',accentColor:'#4DD4C1',marginBottom:8}}/>
+              </div>
+            </div>
 
             <PL>Cor do nó</PL>
             <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:8,alignItems:'center'}}>
