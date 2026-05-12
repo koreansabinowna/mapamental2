@@ -377,6 +377,15 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const [previewImg, setPreviewImg] = useState(null)
   const [defaultShape, setDefaultShape] = useState('rect')
   const [pendingShape, setPendingShape] = useState(null)
+  const [lineStyle, setLineStyle] = useState('curve')   // 'curve'|'arrow'|'straight'|'ortho'
+  const [freeLines, setFreeLines] = useState([])         // [{id,x1,y1,x2,y2,color,lw}]
+  const [labels, setLabels] = useState([])               // [{id,text,x,y,fs,color,ff}]
+  const [drawLine, setDrawLine] = useState(null)         // {x1,y1,x2,y2} while drawing
+  const [selLabel, setSelLabel] = useState(null)
+  const [editLabel, setEditLabel] = useState(null)
+  const [dragLabel, setDragLabel] = useState(null)       // {id,ox,oy,sx,sy}
+  const [selFreeLine, setSelFreeLine] = useState(null)
+  const [drawColor, setDrawColor] = useState('#ffffff')
 
   const svgRef    = useRef(null)
   const editRef   = useRef(null)
@@ -391,6 +400,8 @@ function MapEditor({ mapId, mapTitle, onBack }) {
         const d = typeof map.data === 'string' ? JSON.parse(map.data) : map.data
         setNd(d.nodes || {})
         setXs(d.xs || [])
+        setFreeLines(d.freeLines || [])
+        setLabels(d.labels || [])
         setBg(map.bg_color || '#0d0d14')
         setLoading(false)
       })
@@ -408,14 +419,14 @@ function MapEditor({ mapId, mapTitle, onBack }) {
         await api.updateMap(mapId, {
           title: titleRef.current,
           bg_color: bg,
-          data: { nodes: nd, xs }
+          data: { nodes: nd, xs, freeLines, labels }
         })
         setSaved(true)
       } catch(e) { console.error('Auto-save:', e) }
       finally { setSaving(false) }
     }, 1500)
     return () => clearTimeout(saveTimer.current)
-  }, [nd, xs, bg])
+  }, [nd, xs, bg, freeLines, labels])
 
   // ── Histórico ─────────────────────────────────────────
   const snap = useCallback((n=nd, x=xs) => {
@@ -504,11 +515,31 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     }
   }, [edit])
 
+  // ── Converter coordenadas cliente → mundo ────────────
+  const clientToWorld = (cx, cy) => {
+    const r = svgRef.current.getBoundingClientRect()
+    return { x:(cx-r.left-vp.x)/vp.s, y:(cy-r.top-vp.y)/vp.s }
+  }
+
   // ── Eventos de mouse ──────────────────────────────────
   const onSvgDown = (e) => {
     if (e.button !== 0) return
     if (edit) { finEdit(); return }
-    setSel(null); setCtx(null)
+    setCtx(null); setSel(null); setSelLabel(null); setSelFreeLine(null)
+
+    if (tool === 'draw') {
+      const p = clientToWorld(e.clientX, e.clientY)
+      setDrawLine({x1:p.x, y1:p.y, x2:p.x, y2:p.y})
+      return
+    }
+    if (tool === 'text') {
+      const p = clientToWorld(e.clientX, e.clientY)
+      const id = G()
+      setLabels(ls => [...ls, {id, text:'Texto', x:p.x, y:p.y, fs:18, color:'#ffffff', ff:'Poppins'}])
+      setSelLabel(id); setEditLabel(id)
+      setTool('sel')
+      return
+    }
     setPan({sx:e.clientX, sy:e.clientY, vx:vp.x, vy:vp.y})
   }
 
@@ -528,14 +559,22 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   }
 
   const onMove = (e) => {
+    if (drawLine) {
+      const p = clientToWorld(e.clientX, e.clientY)
+      setDrawLine(dl => dl ? {...dl, x2:p.x, y2:p.y} : null)
+      return
+    }
+    if (dragLabel) {
+      const dx=(e.clientX-dragLabel.sx)/vp.s, dy=(e.clientY-dragLabel.sy)/vp.s
+      setLabels(ls => ls.map(l => l.id===dragLabel.id ? {...l,x:dragLabel.ox+dx,y:dragLabel.oy+dy} : l))
+      return
+    }
     if (resize) {
       const dx=(e.clientX-resize.sx)/vp.s, dy=(e.clientY-resize.sy)/vp.s
       const updates = {}
       if (resize.dir==='w') {
-        // Left handle: increase width to left, move x
         const newW = Math.max(70, Math.round(resize.ow - dx))
-        updates.w = newW
-        updates.x = resize.ox + (resize.ow - newW)
+        updates.w = newW; updates.x = resize.ox + (resize.ow - newW)
       } else {
         if (resize.dir.includes('e')) updates.w = Math.max(70, Math.round(resize.ow + dx))
         if (resize.dir.includes('s')) updates.h = Math.max(30, Math.round(resize.oh + dy))
@@ -550,8 +589,14 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   }
 
   const onUp = () => {
+    if (drawLine) {
+      if (Math.abs(drawLine.x2-drawLine.x1)>8 || Math.abs(drawLine.y2-drawLine.y1)>8)
+        setFreeLines(fl => [...fl, {id:G(), ...drawLine, color:drawColor, lw:2}])
+      setDrawLine(null); return
+    }
+    if (dragLabel) { setDragLabel(null); return }
     if (resize) { snap(); setResize(null) }
-    if (drag)   { snap(); setDrag(null) }
+    if (drag)   { snap(); setDrag(null)  }
     if (pan)    setPan(null)
   }
 
@@ -580,10 +625,14 @@ function MapEditor({ mapId, mapTitle, onBack }) {
       if ((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&e.key==='Z'))) { e.preventDefault(); redo() }
       if (e.key==='Tab'   && sel && !edit) { e.preventDefault(); addChild(sel) }
       if (e.key==='Enter' && sel && !edit) { e.preventDefault(); addSib(sel)   }
-      if ((e.key==='Delete'||e.key==='Backspace') && sel && !edit) del(sel)
+      if ((e.key==='Delete'||e.key==='Backspace') && !edit) {
+        if (sel) del(sel)
+        if (selLabel) { setLabels(ls=>ls.filter(l=>l.id!==selLabel)); setSelLabel(null) }
+        if (selFreeLine) { setFreeLines(fl=>fl.filter(l=>l.id!==selFreeLine)); setSelFreeLine(null) }
+      }
       if (e.key==='Escape') {
         if (previewImg) { setPreviewImg(null); return }
-        setEdit(null); setCtx(null); setCf(null); setTool('sel')
+        setEdit(null); setEditLabel(null); setCtx(null); setCf(null); setTool('sel'); setDrawLine(null)
       }
     }
     window.addEventListener('keydown', h)
@@ -640,29 +689,37 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     </div>
   )
 
+  // ── Função de caminho conforme estilo de linha ────────
+  const edgePath = (x1,y1,x2,y2) => {
+    if (lineStyle==='straight'||lineStyle==='arrow') return `M${x1} ${y1} L${x2} ${y2}`
+    if (lineStyle==='ortho') { const mx=(x1+x2)/2; return `M${x1} ${y1} L${mx} ${y1} L${mx} ${y2} L${x2} ${y2}` }
+    return curve(x1,y1,x2,y2)
+  }
+  const arrowEnd = (lineStyle==='arrow'||lineStyle==='ortho') ? 'url(#arrowhead)' : ''
+
+  const sn = sel ? nd[sel] : null
+
   // ── Renderizar arestas ────────────────────────────────
   const edges = []
   Object.values(nd).forEach(n => {
     if (!n.p || !nd[n.p]) return
     const p=nd[n.p], toR=n.x>=p.x
-    const ph = totalH(p), nh = totalH(n)
+    const ph=totalH(p), nh=totalH(n)
     edges.push(<path key={`e${n.id}`}
-      d={curve(toR?p.x+p.w:p.x, p.y+ph/2, toR?n.x:n.x+n.w, n.y+nh/2)}
-      stroke={n.bg} strokeWidth="2.5" fill="none" strokeOpacity=".75"
-      style={{pointerEvents:'none'}}
+      d={edgePath(toR?p.x+p.w:p.x, p.y+ph/2, toR?n.x:n.x+n.w, n.y+nh/2)}
+      stroke={n.bg} strokeWidth="2.5" fill="none" strokeOpacity=".8"
+      markerEnd={arrowEnd} style={{pointerEvents:'none'}}
     />)
   })
   xs.forEach(x => {
     const a=nd[x.from], b=nd[x.to]; if(!a||!b) return
     edges.push(<path key={`x${x.id}`}
-      d={curve(a.x+a.w/2,a.y+totalH(a)/2,b.x+b.w/2,b.y+totalH(b)/2)}
+      d={edgePath(a.x+a.w/2,a.y+totalH(a)/2,b.x+b.w/2,b.y+totalH(b)/2)}
       stroke="#F5C16C" strokeWidth="2" strokeDasharray="7 3" fill="none"
-      style={{cursor:'pointer'}}
+      markerEnd={arrowEnd} style={{cursor:'pointer'}}
       onClick={()=>{ snap(); setXs(cur=>cur.filter(e=>e.id!==x.id)) }}
     />)
   })
-
-  const sn = sel ? nd[sel] : null
 
   // ── Renderiza texto com quebra de linha automática ────
   const renderText = (n, imgOffset) => {
@@ -733,6 +790,32 @@ function MapEditor({ mapId, mapTitle, onBack }) {
         <button style={S.toolBtn(tool==='con')} onClick={()=>{setTool(t=>t==='con'?'sel':'con');setCf(null)}} title="Conectar dois nós">🔗 Conectar</button>
 
         <span style={S.divider}/>
+        <span style={{fontSize:11,color:'rgba(255,255,255,.4)'}}>Linha:</span>
+        {[
+          {k:'curve',  label:'〜 Curva'},
+          {k:'arrow',  label:'→ Seta'},
+          {k:'straight',label:'— Reta'},
+          {k:'ortho',  label:'⌐ Angular'},
+        ].map(({k,label})=>(
+          <button key={k} style={S.toolBtn(lineStyle===k)} onClick={()=>setLineStyle(k)} title={label}>
+            {label}
+          </button>
+        ))}
+
+        <span style={S.divider}/>
+        <button style={S.toolBtn(tool==='draw')}
+          onClick={()=>setTool(t=>t==='draw'?'sel':'draw')} title="Desenhar linha livre">
+          ✏️ Linha
+        </button>
+        <input type="color" value={drawColor} onChange={e=>setDrawColor(e.target.value)}
+          style={{width:22,height:22,border:'none',borderRadius:4,cursor:'pointer',padding:0,flexShrink:0}}
+          title="Cor da linha"/>
+        <button style={S.toolBtn(tool==='text')}
+          onClick={()=>setTool(t=>t==='text'?'sel':'text')} title="Adicionar texto livre">
+          𝕋 Texto
+        </button>
+
+        <span style={S.divider}/>
         <button style={{...S.toolBtn(false),opacity:hist.length?.9:.35}} onClick={undo} disabled={!hist.length} title="Desfazer (Ctrl+Z)">↩ Desfazer</button>
         <button style={{...S.toolBtn(false),opacity:fut.length?.9:.35}}  onClick={redo} disabled={!fut.length}  title="Refazer (Ctrl+Y)">↪ Refazer</button>
 
@@ -766,7 +849,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
       {/* ── Canvas SVG ───────────────────────────────── */}
       <div style={{flex:1,position:'relative',overflow:'hidden'}}>
         <svg ref={svgRef} width="100%" height="100%"
-          style={{display:'block',cursor:drag?'grabbing':tool==='con'?'crosshair':pan?'grabbing':'grab'}}
+          style={{display:'block',cursor:drawLine||tool==='draw'?'crosshair':tool==='text'?'text':drag?'grabbing':tool==='con'?'crosshair':pan?'grabbing':'grab'}}
           onMouseDown={onSvgDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
           onWheel={onWheel} onContextMenu={e=>e.preventDefault()}
         >
@@ -774,10 +857,84 @@ function MapEditor({ mapId, mapTitle, onBack }) {
             <pattern id="gdots" width="30" height="30" patternUnits="userSpaceOnUse">
               <circle cx="15" cy="15" r=".65" fill="rgba(128,128,128,.1)"/>
             </pattern>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="rgba(255,255,255,.75)"/>
+            </marker>
           </defs>
           <rect width="100%" height="100%" fill="url(#gdots)"/>
           <g transform={`translate(${vp.x},${vp.y}) scale(${vp.s})`}>
             {edges}
+            {/* Linhas livres */}
+            {freeLines.map(fl=>(
+              <line key={fl.id} x1={fl.x1} y1={fl.y1} x2={fl.x2} y2={fl.y2}
+                stroke={fl.color} strokeWidth={fl.lw||2}
+                strokeLinecap="round"
+                style={{cursor:'pointer'}}
+                stroke-opacity={selFreeLine===fl.id?1:.8}
+                onClick={()=>setSelFreeLine(selFreeLine===fl.id?null:fl.id)}
+              />
+            ))}
+            {selFreeLine && <g>
+              <text x={0} y={0} style={{pointerEvents:'none',userSelect:'none',display:'none'}}/> 
+              {/* Delete hint */}
+              {(() => { const fl=freeLines.find(f=>f.id===selFreeLine); return fl ? (
+                <text x={(fl.x1+fl.x2)/2} y={(fl.y1+fl.y2)/2-12} textAnchor="middle"
+                  fill="#ff9090" fontSize={12} style={{pointerEvents:'none',userSelect:'none'}}>
+                  Del para excluir
+                </text>
+              ) : null })()}
+            </g>}
+            {/* Linha sendo desenhada */}
+            {drawLine && (
+              <line x1={drawLine.x1} y1={drawLine.y1} x2={drawLine.x2} y2={drawLine.y2}
+                stroke={drawColor} strokeWidth={2} strokeDasharray="6 3"
+                strokeLinecap="round" style={{pointerEvents:'none'}}/>
+            )}
+            {/* Labels / textos livres */}
+            {labels.map(lb=>(
+              <g key={lb.id} transform={`translate(${lb.x},${lb.y})`}
+                style={{cursor:'move'}}
+                onMouseDown={e=>{
+                  e.stopPropagation()
+                  setSelLabel(lb.id); setSel(null)
+                  setDragLabel({id:lb.id,ox:lb.x,oy:lb.y,sx:e.clientX,sy:e.clientY})
+                }}
+                onDoubleClick={e=>{e.stopPropagation();setEditLabel(lb.id)}}
+              >
+                {editLabel===lb.id
+                  ? <foreignObject x={-100} y={-lb.fs} width={220} height={lb.fs*2+8}>
+                      <input xmlns="http://www.w3.org/1999/xhtml"
+                        style={{width:'100%',border:'none',outline:'none',background:'transparent',
+                          color:lb.color,fontSize:lb.fs,fontFamily:lb.ff,fontWeight:600,textAlign:'center',padding:0}}
+                        defaultValue={lb.text}
+                        autoFocus
+                        onBlur={e=>{
+                          setLabels(ls=>ls.map(l=>l.id===lb.id?{...l,text:e.target.value||l.text}:l))
+                          setEditLabel(null)
+                        }}
+                        onKeyDown={e=>{
+                          if(e.key==='Enter'||e.key==='Escape'){
+                            setLabels(ls=>ls.map(l=>l.id===lb.id?{...l,text:e.target.value||l.text}:l))
+                            setEditLabel(null)
+                          }
+                          e.stopPropagation()
+                        }}
+                        onClick={e=>e.stopPropagation()}
+                      />
+                    </foreignObject>
+                  : <>
+                      {selLabel===lb.id && <rect x={-8} y={-lb.fs-4} width={lb.text.length*lb.fs*.6+16}
+                        height={lb.fs+12} rx={4} fill="none"
+                        stroke="rgba(255,255,255,.3)" strokeWidth={1} strokeDasharray="4 2"/>}
+                      <text textAnchor="start" dominantBaseline="middle" y={0}
+                        fill={lb.color} fontSize={lb.fs} fontFamily={lb.ff} fontWeight={600}
+                        style={{userSelect:'none',pointerEvents:'none'}}>
+                        {lb.text}
+                      </text>
+                    </>
+                }
+              </g>
+            ))}
             {Object.values(nd).map(n=>{
               const th = totalH(n)
               return (
@@ -846,7 +1003,50 @@ function MapEditor({ mapId, mapTitle, onBack }) {
           </g>
         </svg>
 
-        {/* ── Painel de propriedades ────────────────── */}
+        {/* ── Painel de texto livre (label selecionado) ── */}
+        {selLabel && !sn && (() => {
+          const lb = labels.find(l=>l.id===selLabel)
+          if (!lb) return null
+          return (
+            <div style={{position:'absolute',right:12,top:12,width:200,
+              background:'rgba(8,8,18,.96)',backdropFilter:'blur(18px)',
+              border:'1px solid rgba(255,255,255,.1)',borderRadius:14,padding:14,color:'#fff'}}>
+              <div style={{fontWeight:600,fontSize:13,color:'#4DD4C1',marginBottom:10,
+                paddingBottom:8,borderBottom:'1px solid rgba(255,255,255,.07)'}}>
+                𝕋 Texto livre
+              </div>
+              <PL>Texto</PL>
+              <input style={S.panelInput} value={lb.text}
+                onChange={e=>setLabels(ls=>ls.map(l=>l.id===selLabel?{...l,text:e.target.value}:l))}/>
+              <PL>Tamanho: {lb.fs}px</PL>
+              <input type="range" min="10" max="80" value={lb.fs}
+                onChange={e=>setLabels(ls=>ls.map(l=>l.id===selLabel?{...l,fs:+e.target.value}:l))}
+                style={{width:'100%',accentColor:'#4DD4C1',marginBottom:8}}/>
+              <PL>Cor</PL>
+              <div style={{display:'flex',gap:4,marginBottom:8,alignItems:'center'}}>
+                {['#ffffff','#FFD700','#4DD4C1','#FF6B6B','#60C5FA','#6BCB77'].map(c=>(
+                  <div key={c} onClick={()=>setLabels(ls=>ls.map(l=>l.id===selLabel?{...l,color:c}:l))}
+                    style={{width:18,height:18,borderRadius:'50%',background:c,cursor:'pointer',
+                      border:`2px solid ${lb.color===c?'white':'transparent'}`}}/>
+                ))}
+                <input type="color" value={lb.color}
+                  onChange={e=>setLabels(ls=>ls.map(l=>l.id===selLabel?{...l,color:e.target.value}:l))}
+                  style={{width:18,height:18,border:'none',borderRadius:'50%',cursor:'pointer',padding:0}}/>
+              </div>
+              <PL>Fonte</PL>
+              <select value={lb.ff} style={S.select}
+                onChange={e=>setLabels(ls=>ls.map(l=>l.id===selLabel?{...l,ff:e.target.value}:l))}>
+                {FONTS.map(f=><option key={f} value={f}>{f}</option>)}
+              </select>
+              <button style={{...S.panelBtn(true),width:'100%'}}
+                onClick={()=>{setLabels(ls=>ls.filter(l=>l.id!==selLabel));setSelLabel(null)}}>
+                🗑️ Excluir texto
+              </button>
+            </div>
+          )
+        })()}
+
+        {/* ── Painel de propriedades do nó ─────────── */}
         {sn && (
           <div style={{position:'absolute',right:12,top:12,width:215,
             maxHeight:'calc(100% - 24px)',overflowY:'auto',
@@ -1061,6 +1261,20 @@ function MapEditor({ mapId, mapTitle, onBack }) {
             borderRadius:22,fontWeight:700,fontSize:13,whiteSpace:'nowrap',
             boxShadow:'0 4px 20px rgba(245,193,108,.3)'}}>
             🔗 {cf ? `De: "${nd[cf]?.text}" → clique no nó destino` : 'Clique no nó de origem'} &nbsp;·&nbsp; ESC para cancelar
+          </div>
+        )}
+        {tool==='draw' && (
+          <div style={{position:'absolute',bottom:16,left:'50%',transform:'translateX(-50%)',
+            background:'rgba(107,203,119,.9)',color:'#000',padding:'9px 22px',
+            borderRadius:22,fontWeight:700,fontSize:13,whiteSpace:'nowrap'}}>
+            ✏️ Clique e arraste para desenhar uma linha &nbsp;·&nbsp; ESC para cancelar
+          </div>
+        )}
+        {tool==='text' && (
+          <div style={{position:'absolute',bottom:16,left:'50%',transform:'translateX(-50%)',
+            background:'rgba(77,212,193,.9)',color:'#000',padding:'9px 22px',
+            borderRadius:22,fontWeight:700,fontSize:13,whiteSpace:'nowrap'}}>
+            𝕋 Clique em qualquer lugar do canvas para adicionar texto &nbsp;·&nbsp; ESC para cancelar
           </div>
         )}
 
