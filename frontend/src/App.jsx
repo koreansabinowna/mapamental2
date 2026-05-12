@@ -46,11 +46,68 @@ function autoHeight(lines, fontSize) {
   return Math.max(36, lines.length * (fontSize + 10) + 14)
 }
 
+// ─── Formas geométricas de fluxograma ─────────────────────
+const SHAPE_LIST = [
+  { key:'rect',         label:'Processo'       },
+  { key:'diamond',      label:'Decisão'        },
+  { key:'ellipse',      label:'Operação'       },
+  { key:'terminal',     label:'Terminal'       },
+  { key:'parallelogram',label:'Input/Output'   },
+  { key:'trapezoid',    label:'Op. Manual'     },
+  { key:'hexagon',      label:'Preparação'     },
+  { key:'document',     label:'Documento'      },
+  { key:'cylinder',     label:'Database'       },
+  { key:'pentagon',     label:'Conex. Pág.'    },
+  { key:'delay',        label:'Atraso'         },
+  { key:'stored_data',  label:'Dados Armaz.'   },
+  { key:'predefined',   label:'Proc. Pré-def.' },
+  { key:'storage',      label:'Armazenamento'  },
+  { key:'display',      label:'Display'        },
+]
+
+function shapePath(shape, w, h) {
+  const r = Math.min(h/2, w/3)
+  switch(shape) {
+    case 'diamond':      return `M${w/2},0 L${w},${h/2} L${w/2},${h} L0,${h/2} Z`
+    case 'terminal':     return `M${r},0 L${w-r},0 A${r},${r} 0 0,1 ${w-r},${h} L${r},${h} A${r},${r} 0 0,1 ${r},0 Z`
+    case 'parallelogram':return `M${h*.32},0 L${w},0 L${w-h*.32},${h} L0,${h} Z`
+    case 'trapezoid':    return `M${h*.22},0 L${w-h*.22},0 L${w},${h} L0,${h} Z`
+    case 'hexagon':      return `M${w*.2},0 L${w*.8},0 L${w},${h/2} L${w*.8},${h} L${w*.2},${h} L0,${h/2} Z`
+    case 'document':     { const wh=h*.18; return `M0,0 L${w},0 L${w},${h-wh} Q${w*.75},${h} ${w*.5},${h-wh} Q${w*.25},${h-wh*2} 0,${h-wh} Z` }
+    case 'pentagon':     return `M0,0 L${w},0 L${w},${h*.65} L${w/2},${h} L0,${h*.65} Z`
+    case 'delay':        { const dr=h/2; return `M0,0 L${w-dr},0 A${dr},${dr} 0 0,1 ${w-dr},${h} L0,${h} Z` }
+    case 'stored_data':  return `M${h*.32},0 L${w},0 L${w},${h} L${h*.32},${h} Q0,${h*.75} 0,${h/2} Q0,${h*.25} ${h*.32},0 Z`
+    case 'predefined':   return `M0,0 L${w},0 L${w},${h} L0,${h} Z`
+    case 'storage':      return `M0,0 L${w},0 L${w*.72},${h} L${w*.28},${h} Z`
+    case 'display':      { const dl=h*.35,dr2=w-h*.25; return `M${dl},0 L${dr2},0 Q${w},0 ${w},${h/2} Q${w},${h} ${dr2},${h} L${dl},${h} L0,${h/2} Z` }
+    default:             return `M12,0 L${w-12},0 Q${w},0 ${w},12 L${w},${h-12} Q${w},${h} ${w-12},${h} L12,${h} Q0,${h} 0,${h-12} L0,12 Q0,0 12,0 Z`
+  }
+}
+
+function NodeShape({ shape, w, h, fill, stroke, strokeWidth }) {
+  const sw = strokeWidth||1, st = stroke||'rgba(255,255,255,.12)'
+  if (shape==='ellipse') return <ellipse cx={w/2} cy={h/2} rx={w/2} ry={h/2} fill={fill} stroke={st} strokeWidth={sw}/>
+  if (shape==='cylinder') {
+    const ry = Math.max(7, h*.15)
+    return <g>
+      <path d={`M0,${ry} L0,${h-ry} A${w/2},${ry} 0 0,0 ${w},${h-ry} L${w},${ry} A${w/2},${ry} 0 0,0 0,${ry} Z`} fill={fill} stroke={st} strokeWidth={sw}/>
+      <ellipse cx={w/2} cy={ry} rx={w/2} ry={ry} fill={fill} stroke={st} strokeWidth={sw}/>
+      <path d={`M0,${ry} A${w/2},${ry} 0 0,1 ${w},${ry}`} fill="none" stroke="rgba(0,0,0,.2)" strokeWidth={sw}/>
+    </g>
+  }
+  if (shape==='predefined') return <g>
+    <path d={shapePath('predefined',w,h)} fill={fill} stroke={st} strokeWidth={sw}/>
+    <line x1={w*.12} y1={0} x2={w*.12} y2={h} stroke={st} strokeWidth={sw}/>
+    <line x1={w*.88} y1={0} x2={w*.88} y2={h} stroke={st} strokeWidth={sw}/>
+  </g>
+  return <path d={shapePath(shape,w,h)} fill={fill} stroke={st} strokeWidth={sw}/>
+}
+
 const INIT_MAP = () => ({
   nodes: {
-    r: {id:'r',text:'Meu Mapa',x:-75,y:-22,w:150,h:44,bg:'#4DD4C1',fg:'#fff',fs:17,ff:'Poppins',p:null,ch:['a','b'],lk:'',nt:'',img:''},
-    a: {id:'a',text:'Tópico 1', x:195,y:-82,w:130,h:42,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:''},
-    b: {id:'b',text:'Tópico 2', x:195,y: 52,w:130,h:42,bg:'#45B7D1',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:''},
+    r: {id:'r',text:'Meu Mapa',x:-75,y:-22,w:150,h:44,bg:'#4DD4C1',fg:'#fff',fs:17,ff:'Poppins',p:null,ch:['a','b'],lk:'',nt:'',img:'',shape:'rect'},
+    a: {id:'a',text:'Tópico 1', x:195,y:-82,w:130,h:42,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:'',shape:'rect'},
+    b: {id:'b',text:'Tópico 2', x:195,y: 52,w:130,h:42,bg:'#45B7D1',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:'',shape:'rect'},
   },
   xs: [],
 })
@@ -318,6 +375,8 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const [shareUrl, setShareUrl] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [previewImg, setPreviewImg] = useState(null)
+  const [defaultShape, setDefaultShape] = useState('rect')
+  const [pendingShape, setPendingShape] = useState(null)
 
   const svgRef    = useRef(null)
   const editRef   = useRef(null)
@@ -388,13 +447,27 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     setNd(n=>({
       ...n,
       [id]: {id,text:'Novo nó',x:p.x+p.w+90,y:p.y+(i-(i>>1))*74,w:120,h:40,
-              bg:PAL[i%PAL.length],fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:''},
+              bg:PAL[i%PAL.length],fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape},
       [pid]: {...n[pid], ch:[...n[pid].ch, id]}
     }))
     setSel(id); setEdit(id); setEv('Novo nó')
   }, [nd, snap])
 
   const addSib = useCallback((id) => addChild(nd[id]?.p || id), [nd, addChild])
+
+  const addBinary = useCallback((pid) => {
+    const p = nd[pid]; if (!p) return
+    const simId = G(), naoId = G()
+    const baseX = p.x + p.w + 90
+    snap()
+    setNd(n=>({
+      ...n,
+      [simId]: {id:simId,text:'Sim',  x:baseX,y:p.y-60,w:100,h:40,bg:'#6BCB77',fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape},
+      [naoId]: {id:naoId,text:'Não',  x:baseX,y:p.y+60,w:100,h:40,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape},
+      [pid]:   {...n[pid], ch:[...n[pid].ch, simId, naoId]}
+    }))
+    setSel(simId)
+  }, [nd, snap, defaultShape])
 
   const del = useCallback((id) => {
     if (id === 'r') return
@@ -719,10 +792,12 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                   </clipPath>
                 </defs>
                 {/* Sombra */}
-                <rect x="3" y="5" rx="11" width={n.w} height={th} fill="rgba(0,0,0,.3)" style={{pointerEvents:'none'}}/>
+                <g transform="translate(3,5)" style={{pointerEvents:'none',opacity:.4}}>
+                  <NodeShape shape={n.shape||'rect'} w={n.w} h={th} fill="rgba(0,0,0,.6)" stroke="none" strokeWidth={0}/>
+                </g>
                 {/* Fundo do nó */}
-                <rect rx="11" width={n.w} height={th} fill={n.bg}
-                  stroke={sel===n.id?'rgba(255,255,255,.9)':'rgba(255,255,255,.12)'}
+                <NodeShape shape={n.shape||'rect'} w={n.w} h={th} fill={n.bg}
+                  stroke={sel===n.id?'rgba(255,255,255,.9)':'rgba(255,255,255,.15)'}
                   strokeWidth={sel===n.id?2.5:1}/>
                 {/* Imagem (se houver) */}
                 {n.img && <>
@@ -852,7 +927,61 @@ function MapEditor({ mapId, mapTitle, onBack }) {
               value={sn.nt||''} placeholder="Suas anotações..."
               onChange={e=>upd(sel,{nt:e.target.value})}/>
 
-            <PL>🖼️ Imagem do nó</PL>
+            <PL>🔷 Forma geométrica</PL>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:5}}>
+              Padrão: <b style={{color:'#4DD4C1'}}>{SHAPE_LIST.find(s=>s.key===defaultShape)?.label}</b>
+              {sn && <> &nbsp;·&nbsp; Nó atual: <b style={{color:'#F5C16C'}}>{SHAPE_LIST.find(s=>s.key===(sn.shape||'rect'))?.label}</b></>}
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:3,marginBottom:6}}>
+              {SHAPE_LIST.map(s=>{
+                const isDefault = defaultShape===s.key
+                const isCurrent = sn && (sn.shape||'rect')===s.key
+                return (
+                  <div key={s.key} onClick={()=>setPendingShape(s.key)} title={s.label}
+                    style={{background:isCurrent?'rgba(245,193,108,.2)':isDefault?'rgba(77,212,193,.15)':'rgba(255,255,255,.04)',
+                      border:`1px solid ${isCurrent?'#F5C16C':isDefault?'#4DD4C1':'rgba(255,255,255,.08)'}`,
+                      borderRadius:6,padding:'4px 2px',cursor:'pointer',display:'flex',
+                      flexDirection:'column',alignItems:'center',gap:2,transition:'all .15s'}}
+                    onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.1)'}
+                    onMouseLeave={e=>e.currentTarget.style.background=isCurrent?'rgba(245,193,108,.2)':isDefault?'rgba(77,212,193,.15)':'rgba(255,255,255,.04)'}>
+                    <svg width="44" height="26" style={{overflow:'visible'}}>
+                      <NodeShape shape={s.key} w={44} h={26} fill={sn?.bg||'#4DD4C1'}
+                        stroke={isCurrent?'#F5C16C':isDefault?'#4DD4C1':'rgba(255,255,255,.35)'}
+                        strokeWidth={1.5}/>
+                    </svg>
+                    <span style={{fontSize:8.5,color:'rgba(255,255,255,.55)',textAlign:'center',lineHeight:1.2}}>{s.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {pendingShape && (
+              <div style={{background:'rgba(245,193,108,.1)',border:'1px solid rgba(245,193,108,.3)',borderRadius:8,padding:'8px',marginBottom:8}}>
+                <div style={{fontSize:11,color:'#F5C16C',marginBottom:6,fontWeight:600}}>
+                  {SHAPE_LIST.find(s=>s.key===pendingShape)?.label} — aplicar onde?
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4}}>
+                  <button style={{...S.panelBtn(false),fontSize:10,padding:'5px 3px'}}
+                    onClick={()=>{snap();upd(sel,{shape:pendingShape});setPendingShape(null)}}>
+                    Este nó
+                  </button>
+                  <button style={{...S.panelBtn(false),fontSize:10,padding:'5px 3px'}}
+                    onClick={()=>{setDefaultShape(pendingShape);setPendingShape(null)}}>
+                    Próximos nós
+                  </button>
+                  <button style={{...S.panelBtn(false),fontSize:10,padding:'5px 3px',gridColumn:'1/-1',
+                    background:'rgba(77,212,193,.1)',borderColor:'rgba(77,212,193,.3)',color:'#4DD4C1'}}
+                    onClick={()=>{snap();upd(sel,{shape:pendingShape});setDefaultShape(pendingShape);setPendingShape(null)}}>
+                    Ambos (nó + padrão)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button style={{...S.panelBtn(false),width:'100%',marginBottom:8,
+              background:'rgba(107,203,119,.1)',color:'#6BCB77',borderColor:'rgba(107,203,119,.3)'}}
+              onClick={()=>addBinary(sel)}>
+              🔀 Fluxo Sim / Não
+            </button>
             {sn.img && (
               <div style={{marginBottom:8,position:'relative'}}>
                 <img src={sn.img} alt="" style={{width:'100%',height:70,objectFit:'cover',borderRadius:8,display:'block'}}/>
@@ -894,6 +1023,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
             {[
               ['➕ Adicionar filho  (Tab)',    ()=>addChild(ctx.id)],
               ['➕ Adicionar irmão  (Enter)',  ()=>addSib(ctx.id)],
+              ['🔀 Fluxo Sim / Não',           ()=>addBinary(ctx.id)],
               ['✏️ Editar texto',               ()=>{setEdit(ctx.id);setEv(nd[ctx.id].text)}],
               ['🔗 Conectar a nó...',           ()=>{setTool('con');setCf(ctx.id)}],
               ...(xs.some(x=>x.from===ctx.id||x.to===ctx.id)
