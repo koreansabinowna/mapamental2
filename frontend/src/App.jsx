@@ -378,6 +378,8 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const [defaultShape, setDefaultShape] = useState('rect')
   const [pendingShape, setPendingShape] = useState(null)
   const [lineStyle, setLineStyle] = useState('curve')   // 'curve'|'arrow'|'straight'|'ortho'
+  const [edgeStyles, setEdgeStyles] = useState({})       // {childNodeId: style} — estilo por aresta
+  const [selEdge, setSelEdge] = useState(null)           // {type:'pc'|'xs', id:string}
   const [freeLines, setFreeLines] = useState([])         // [{id,x1,y1,x2,y2,color,lw}]
   const [labels, setLabels] = useState([])               // [{id,text,x,y,fs,color,ff}]
   const [drawLine, setDrawLine] = useState(null)         // {x1,y1,x2,y2} while drawing
@@ -400,6 +402,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
         const d = typeof map.data === 'string' ? JSON.parse(map.data) : map.data
         setNd(d.nodes || {})
         setXs(d.xs || [])
+        setEdgeStyles(d.edgeStyles || {})
         setFreeLines(d.freeLines || [])
         setLabels(d.labels || [])
         setBg(map.bg_color || '#0d0d14')
@@ -419,14 +422,14 @@ function MapEditor({ mapId, mapTitle, onBack }) {
         await api.updateMap(mapId, {
           title: titleRef.current,
           bg_color: bg,
-          data: { nodes: nd, xs, freeLines, labels }
+          data: { nodes: nd, xs, freeLines, labels, edgeStyles }
         })
         setSaved(true)
       } catch(e) { console.error('Auto-save:', e) }
       finally { setSaving(false) }
     }, 1500)
     return () => clearTimeout(saveTimer.current)
-  }, [nd, xs, bg, freeLines, labels])
+  }, [nd, xs, bg, freeLines, labels, edgeStyles])
 
   // ── Histórico ─────────────────────────────────────────
   const snap = useCallback((n=nd, x=xs) => {
@@ -525,7 +528,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const onSvgDown = (e) => {
     if (e.button !== 0) return
     if (edit) { finEdit(); return }
-    setCtx(null); setSel(null); setSelLabel(null); setSelFreeLine(null)
+    setCtx(null); setSel(null); setSelLabel(null); setSelFreeLine(null); setSelEdge(null)
 
     if (tool === 'draw') {
       const p = clientToWorld(e.clientX, e.clientY)
@@ -546,7 +549,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const onNdDown = (e, id) => {
     e.stopPropagation()
     if (e.button === 2) return
-    setCtx(null)
+    setCtx(null); setSelEdge(null)
     if (edit && edit !== id) finEdit()
     if (tool === 'con') {
       if (!cf)        { setCf(id) }
@@ -689,36 +692,60 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     </div>
   )
 
-  // ── Função de caminho conforme estilo de linha ────────
-  const edgePath = (x1,y1,x2,y2) => {
-    if (lineStyle==='straight'||lineStyle==='arrow') return `M${x1} ${y1} L${x2} ${y2}`
-    if (lineStyle==='ortho') { const mx=(x1+x2)/2; return `M${x1} ${y1} L${mx} ${y1} L${mx} ${y2} L${x2} ${y2}` }
+  // ── Caminho conforme estilo (global ou por aresta) ────
+  const edgePath = (x1,y1,x2,y2,style) => {
+    const s = style||lineStyle
+    if (s==='straight'||s==='arrow') return `M${x1} ${y1} L${x2} ${y2}`
+    if (s==='ortho') { const mx=(x1+x2)/2; return `M${x1} ${y1} L${mx} ${y1} L${mx} ${y2} L${x2} ${y2}` }
     return curve(x1,y1,x2,y2)
   }
-  const arrowEnd = (lineStyle==='arrow'||lineStyle==='ortho') ? 'url(#arrowhead)' : ''
+  const arrowFor = (style) => ((style||lineStyle)==='arrow'||(style||lineStyle)==='ortho') ? 'url(#arrowhead)' : ''
 
   const sn = sel ? nd[sel] : null
 
-  // ── Renderizar arestas ────────────────────────────────
+  // ── Renderizar arestas (clicáveis + estilo por aresta) ─
   const edges = []
   Object.values(nd).forEach(n => {
     if (!n.p || !nd[n.p]) return
     const p=nd[n.p], toR=n.x>=p.x
     const ph=totalH(p), nh=totalH(n)
-    edges.push(<path key={`e${n.id}`}
-      d={edgePath(toR?p.x+p.w:p.x, p.y+ph/2, toR?n.x:n.x+n.w, n.y+nh/2)}
-      stroke={n.bg} strokeWidth="2.5" fill="none" strokeOpacity=".8"
-      markerEnd={arrowEnd} style={{pointerEvents:'none'}}
-    />)
+    const x1=toR?p.x+p.w:p.x, y1=p.y+ph/2, x2=toR?n.x:n.x+n.w, y2=n.y+nh/2
+    const es = edgeStyles[n.id] || lineStyle
+    const isSel = selEdge?.type==='pc' && selEdge?.id===n.id
+    const d = edgePath(x1,y1,x2,y2,es)
+    edges.push(
+      <g key={`eg${n.id}`} style={{cursor:'pointer'}}
+        onClick={e=>{e.stopPropagation();setSel(null);setSelLabel(null);setSelFreeLine(null);setSelEdge({type:'pc',id:n.id})}}>
+        {/* Hitbox invisível (mais fácil de clicar) */}
+        <path d={d} fill="none" stroke="transparent" strokeWidth={16}/>
+        {/* Linha visível */}
+        <path d={d} fill="none"
+          stroke={isSel?'#fff':n.bg}
+          strokeWidth={isSel?3.5:2.5}
+          strokeOpacity={isSel?1:.8}
+          markerEnd={arrowFor(es)}/>
+        {isSel && <path d={d} fill="none" stroke="rgba(77,212,193,.4)" strokeWidth={8} style={{pointerEvents:'none'}}/>}
+      </g>
+    )
   })
   xs.forEach(x => {
     const a=nd[x.from], b=nd[x.to]; if(!a||!b) return
-    edges.push(<path key={`x${x.id}`}
-      d={edgePath(a.x+a.w/2,a.y+totalH(a)/2,b.x+b.w/2,b.y+totalH(b)/2)}
-      stroke="#F5C16C" strokeWidth="2" strokeDasharray="7 3" fill="none"
-      markerEnd={arrowEnd} style={{cursor:'pointer'}}
-      onClick={()=>{ snap(); setXs(cur=>cur.filter(e=>e.id!==x.id)) }}
-    />)
+    const x1=a.x+a.w/2,y1=a.y+totalH(a)/2,x2=b.x+b.w/2,y2=b.y+totalH(b)/2
+    const es = x.style || lineStyle
+    const isSel = selEdge?.type==='xs' && selEdge?.id===x.id
+    const d = edgePath(x1,y1,x2,y2,es)
+    edges.push(
+      <g key={`xg${x.id}`} style={{cursor:'pointer'}}
+        onClick={e=>{e.stopPropagation();setSel(null);setSelLabel(null);setSelFreeLine(null);setSelEdge({type:'xs',id:x.id})}}>
+        <path d={d} fill="none" stroke="transparent" strokeWidth={16}/>
+        <path d={d} fill="none"
+          stroke={isSel?'#fff':'#F5C16C'}
+          strokeWidth={isSel?3:2}
+          strokeDasharray={isSel?'':'7 3'}
+          markerEnd={arrowFor(es)}/>
+        {isSel && <path d={d} fill="none" stroke="rgba(245,193,108,.35)" strokeWidth={8} style={{pointerEvents:'none'}}/>}
+      </g>
+    )
   })
 
   // ── Renderiza texto com quebra de linha automática ────
@@ -1003,7 +1030,89 @@ function MapEditor({ mapId, mapTitle, onBack }) {
           </g>
         </svg>
 
-        {/* ── Painel de texto livre (label selecionado) ── */}
+        {/* ── Painel da aresta selecionada ─────────── */}
+        {selEdge && !sn && (() => {
+          const LINE_OPTS = [
+            {k:'curve',   label:'〜 Curva',   desc:'Bezier suave'},
+            {k:'arrow',   label:'→ Seta',     desc:'Reta com seta'},
+            {k:'straight',label:'— Reta',     desc:'Linha direta'},
+            {k:'ortho',   label:'⌐ Angular',  desc:'Cotovelo 90°'},
+          ]
+          const curStyle = selEdge.type==='pc'
+            ? (edgeStyles[selEdge.id] || lineStyle)
+            : (xs.find(x=>x.id===selEdge.id)?.style || lineStyle)
+
+          const changeEdgeStyle = (style) => {
+            if (selEdge.type==='pc') {
+              setEdgeStyles(es=>({...es, [selEdge.id]: style}))
+            } else {
+              setXs(cur=>cur.map(x=>x.id===selEdge.id?{...x,style}:x))
+            }
+          }
+
+          const applyToAll = () => {
+            // Aplica aos nós filhos
+            const newES = {}
+            Object.values(nd).forEach(n=>{ if(n.p) newES[n.id]=curStyle })
+            setEdgeStyles(newES)
+            // Aplica às conexões extras
+            setXs(cur=>cur.map(x=>({...x,style:curStyle})))
+            // Define como padrão global
+            setLineStyle(curStyle)
+          }
+
+          const removeStyle = () => {
+            if (selEdge.type==='pc') setEdgeStyles(es=>{const n={...es};delete n[selEdge.id];return n})
+            else setXs(cur=>cur.map(x=>x.id===selEdge.id?{...x,style:undefined}:x))
+          }
+
+          return (
+            <div style={{position:'absolute',right:12,top:12,width:210,
+              background:'rgba(8,8,18,.96)',backdropFilter:'blur(18px)',
+              border:'1px solid rgba(77,212,193,.3)',borderRadius:14,padding:14,color:'#fff'}}>
+              <div style={{fontWeight:600,fontSize:13,color:'#4DD4C1',marginBottom:10,
+                paddingBottom:8,borderBottom:'1px solid rgba(255,255,255,.07)',display:'flex',alignItems:'center',gap:6}}>
+                〜 Linha selecionada
+                <span style={{fontSize:10,color:'rgba(255,255,255,.35)',marginLeft:'auto'}}>
+                  {selEdge.type==='xs'?'Conexão extra':'Pai → Filho'}
+                </span>
+              </div>
+
+              <PL>Estilo desta linha</PL>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:12}}>
+                {LINE_OPTS.map(({k,label,desc})=>(
+                  <button key={k} title={desc}
+                    onClick={()=>changeEdgeStyle(k)}
+                    style={{padding:'8px 4px',background:curStyle===k?'rgba(77,212,193,.2)':'rgba(255,255,255,.05)',
+                      color:curStyle===k?'#4DD4C1':'rgba(255,255,255,.75)',
+                      border:`1px solid ${curStyle===k?'#4DD4C1':'rgba(255,255,255,.1)'}`,
+                      borderRadius:8,cursor:'pointer',fontSize:12,fontFamily:'Poppins,sans-serif',
+                      fontWeight:curStyle===k?700:400,textAlign:'center'}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{height:1,background:'rgba(255,255,255,.07)',marginBottom:10}}/>
+
+              <button onClick={applyToAll}
+                style={{...S.panelBtn(false),width:'100%',marginBottom:6,
+                  background:'rgba(77,212,193,.1)',color:'#4DD4C1',borderColor:'rgba(77,212,193,.3)'}}>
+                ✅ Aplicar a TODAS as linhas
+              </button>
+              <button onClick={removeStyle}
+                style={{...S.panelBtn(false),width:'100%',marginBottom:6,fontSize:11}}>
+                ↩ Usar estilo padrão global
+              </button>
+              {selEdge.type==='xs' && (
+                <button onClick={()=>{snap();setXs(cur=>cur.filter(x=>x.id!==selEdge.id));setSelEdge(null)}}
+                  style={{...S.panelBtn(true),width:'100%'}}>
+                  🗑️ Excluir esta conexão
+                </button>
+              )}
+            </div>
+          )
+        })()}
         {selLabel && !sn && (() => {
           const lb = labels.find(l=>l.id===selLabel)
           if (!lb) return null
