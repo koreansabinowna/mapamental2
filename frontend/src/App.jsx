@@ -105,9 +105,9 @@ function NodeShape({ shape, w, h, fill, stroke, strokeWidth }) {
 
 const INIT_MAP = () => ({
   nodes: {
-    r: {id:'r',text:'Meu Mapa',x:-75,y:-22,w:150,h:44,bg:'#4DD4C1',fg:'#fff',fs:17,ff:'Poppins',p:null,ch:['a','b'],lk:'',nt:'',img:'',shape:'rect'},
-    a: {id:'a',text:'Tópico 1', x:195,y:-82,w:130,h:42,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:'',shape:'rect'},
-    b: {id:'b',text:'Tópico 2', x:195,y: 52,w:130,h:42,bg:'#45B7D1',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:'',shape:'rect'},
+    r: {id:'r',text:'Meu Mapa',x:-75,y:-22,w:150,h:44,bg:'#4DD4C1',fg:'#fff',fs:17,ff:'Poppins',p:null,ch:['a','b'],lk:'',nt:'',img:'',shape:'rect',collapsed:false},
+    a: {id:'a',text:'Tópico 1', x:195,y:-82,w:130,h:42,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:'',shape:'rect',collapsed:false},
+    b: {id:'b',text:'Tópico 2', x:195,y: 52,w:130,h:42,bg:'#45B7D1',fg:'#fff',fs:14,ff:'Poppins',p:'r',ch:[],lk:'',nt:'',img:'',shape:'rect',collapsed:false},
   },
   xs: [],
 })
@@ -431,25 +431,40 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     return () => clearTimeout(saveTimer.current)
   }, [nd, xs, bg, freeLines, labels, edgeStyles])
 
-  // ── Histórico ─────────────────────────────────────────
-  const snap = useCallback((n=nd, x=xs) => {
-    setHist(h=>[...h.slice(-30), {n:JSON.parse(JSON.stringify(n)), x:JSON.parse(JSON.stringify(x))}])
+  // ── Histórico (inclui todos os estados) ──────────────
+  const makeSnapshot = useCallback(() => ({
+    n:  JSON.parse(JSON.stringify(nd)),
+    x:  JSON.parse(JSON.stringify(xs)),
+    lb: JSON.parse(JSON.stringify(labels)),
+    fl: JSON.parse(JSON.stringify(freeLines)),
+    es: JSON.parse(JSON.stringify(edgeStyles)),
+  }), [nd, xs, labels, freeLines, edgeStyles])
+
+  const snap = useCallback(() => {
+    setHist(h=>[...h.slice(-30), makeSnapshot()])
     setFut([])
-  }, [nd, xs])
+  }, [makeSnapshot])
+
+  const restoreSnapshot = (s) => {
+    setNd(s.n); setXs(s.x)
+    if (s.lb) setLabels(s.lb)
+    if (s.fl) setFreeLines(s.fl)
+    if (s.es) setEdgeStyles(s.es)
+  }
 
   const undo = useCallback(() => {
     if (!hist.length) return
-    const prev = hist[hist.length-1]
-    setFut(f=>[{n:JSON.parse(JSON.stringify(nd)), x:JSON.parse(JSON.stringify(xs))}, ...f.slice(0,30)])
-    setNd(prev.n); setXs(prev.x); setHist(h=>h.slice(0,-1))
-  }, [hist, nd, xs])
+    setFut(f=>[makeSnapshot(), ...f.slice(0,30)])
+    restoreSnapshot(hist[hist.length-1])
+    setHist(h=>h.slice(0,-1))
+  }, [hist, makeSnapshot])
 
   const redo = useCallback(() => {
     if (!fut.length) return
-    const nxt = fut[0]
-    setHist(h=>[...h, {n:JSON.parse(JSON.stringify(nd)), x:JSON.parse(JSON.stringify(xs))}])
-    setNd(nxt.n); setXs(nxt.x); setFut(f=>f.slice(1))
-  }, [fut, nd, xs])
+    setHist(h=>[...h, makeSnapshot()])
+    restoreSnapshot(fut[0])
+    setFut(f=>f.slice(1))
+  }, [fut, makeSnapshot])
 
   const upd = (id, props) => setNd(n=>({...n, [id]:{...n[id],...props}}))
 
@@ -461,7 +476,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     setNd(n=>({
       ...n,
       [id]: {id,text:'Novo nó',x:p.x+p.w+90,y:p.y+(i-(i>>1))*74,w:120,h:40,
-              bg:PAL[i%PAL.length],fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape},
+              bg:PAL[i%PAL.length],fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape,collapsed:false},
       [pid]: {...n[pid], ch:[...n[pid].ch, id]}
     }))
     setSel(id); setEdit(id); setEv('Novo nó')
@@ -476,8 +491,8 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     snap()
     setNd(n=>({
       ...n,
-      [simId]: {id:simId,text:'Sim',  x:baseX,y:p.y-60,w:100,h:40,bg:'#6BCB77',fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape},
-      [naoId]: {id:naoId,text:'Não',  x:baseX,y:p.y+60,w:100,h:40,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape},
+      [simId]: {id:simId,text:'Sim',x:baseX,y:p.y-60,w:100,h:40,bg:'#6BCB77',fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape,collapsed:false},
+      [naoId]: {id:naoId,text:'Não',x:baseX,y:p.y+60,w:100,h:40,bg:'#FF6B6B',fg:'#fff',fs:14,ff:'Poppins',p:pid,ch:[],lk:'',nt:'',img:'',shape:defaultShape,collapsed:false},
       [pid]:   {...n[pid], ch:[...n[pid].ch, simId, naoId]}
     }))
     setSel(simId)
@@ -538,6 +553,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     if (tool === 'text') {
       const p = clientToWorld(e.clientX, e.clientY)
       const id = G()
+      snap()
       setLabels(ls => [...ls, {id, text:'Texto', x:p.x, y:p.y, fs:18, color:'#ffffff', ff:'Poppins'}])
       setSelLabel(id); setEditLabel(id)
       setTool('sel')
@@ -597,7 +613,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
         setFreeLines(fl => [...fl, {id:G(), ...drawLine, color:drawColor, lw:2}])
       setDrawLine(null); return
     }
-    if (dragLabel) { setDragLabel(null); return }
+    if (dragLabel) { snap(); setDragLabel(null); return }
     if (resize) { snap(); setResize(null) }
     if (drag)   { snap(); setDrag(null)  }
     if (pan)    setPan(null)
@@ -692,6 +708,18 @@ function MapEditor({ mapId, mapTitle, onBack }) {
     </div>
   )
 
+  // ── Nós visíveis (respeita collapsed) ────────────────
+  const visibleIds = (() => {
+    const vis = new Set()
+    const walk = (id) => {
+      const n = nd[id]; if (!n) return
+      vis.add(id)
+      if (!n.collapsed) n.ch?.forEach(walk)
+    }
+    Object.values(nd).forEach(n => { if (!n.p) walk(n.id) })
+    return vis
+  })()
+
   // ── Caminho conforme estilo (global ou por aresta) ────
   const edgePath = (x1,y1,x2,y2,style) => {
     const s = style||lineStyle
@@ -707,6 +735,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const edges = []
   Object.values(nd).forEach(n => {
     if (!n.p || !nd[n.p]) return
+    if (!visibleIds.has(n.id) || !visibleIds.has(n.p)) return  // ← filtro collapsed
     const p=nd[n.p], toR=n.x>=p.x
     const ph=totalH(p), nh=totalH(n)
     const x1=toR?p.x+p.w:p.x, y1=p.y+ph/2, x2=toR?n.x:n.x+n.w, y2=n.y+nh/2
@@ -929,18 +958,22 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                 onDoubleClick={e=>{e.stopPropagation();setEditLabel(lb.id)}}
               >
                 {editLabel===lb.id
-                  ? <foreignObject x={-100} y={-lb.fs} width={220} height={lb.fs*2+8}>
+                  ? <foreignObject x={-120} y={-lb.fs*0.7} width={260} height={lb.fs*2}>
                       <input xmlns="http://www.w3.org/1999/xhtml"
-                        style={{width:'100%',border:'none',outline:'none',background:'transparent',
-                          color:lb.color,fontSize:lb.fs,fontFamily:lb.ff,fontWeight:600,textAlign:'center',padding:0}}
+                        style={{width:'100%',border:'none',outline:'2px solid #4DD4C1',
+                          background:'rgba(10,10,20,.9)',color:lb.color,fontSize:lb.fs,
+                          fontFamily:lb.ff,fontWeight:600,textAlign:'center',padding:'2px 6px',
+                          borderRadius:4}}
                         defaultValue={lb.text}
                         autoFocus
                         onBlur={e=>{
+                          snap()
                           setLabels(ls=>ls.map(l=>l.id===lb.id?{...l,text:e.target.value||l.text}:l))
                           setEditLabel(null)
                         }}
                         onKeyDown={e=>{
                           if(e.key==='Enter'||e.key==='Escape'){
+                            snap()
                             setLabels(ls=>ls.map(l=>l.id===lb.id?{...l,text:e.target.value||l.text}:l))
                             setEditLabel(null)
                           }
@@ -962,7 +995,7 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                 }
               </g>
             ))}
-            {Object.values(nd).map(n=>{
+            {Object.values(nd).filter(n=>visibleIds.has(n.id)).map(n=>{
               const th = totalH(n)
               return (
               <g key={n.id} transform={`translate(${n.x},${n.y})`}
@@ -1016,6 +1049,28 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                 {/* Indicadores */}
                 {n.lk && <text x={n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>🔗</text>}
                 {n.nt && <text x={n.lk?n.w-19:n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>💬</text>}
+                {/* Botão collapse/expand (só se tem filhos) */}
+                {n.ch?.length > 0 && (
+                  <g transform={`translate(${n.w+2},${totalH(n)/2})`}
+                    onClick={e=>{e.stopPropagation(); snap(); upd(n.id,{collapsed:!n.collapsed})}}
+                    style={{cursor:'pointer'}}>
+                    <circle r={9} fill={n.collapsed?'#4DD4C1':'rgba(30,30,50,.85)'}
+                      stroke={n.collapsed?'white':'rgba(255,255,255,.5)'} strokeWidth={1.5}/>
+                    <text textAnchor="middle" dominantBaseline="central"
+                      fill="white" fontSize={13} fontWeight="bold"
+                      style={{pointerEvents:'none',userSelect:'none'}}>
+                      {n.collapsed?'+':'−'}
+                    </text>
+                    {/* Contador de filhos ocultos */}
+                    {n.collapsed && (
+                      <text x={13} y={1} textAnchor="start" dominantBaseline="central"
+                        fill="rgba(255,255,255,.5)" fontSize={10}
+                        style={{pointerEvents:'none',userSelect:'none'}}>
+                        {n.ch.length}
+                      </text>
+                    )}
+                  </g>
+                )}
                 {/* Alças de redimensionamento (apenas no nó selecionado) */}
                 {sel===n.id && renderHandles(n)}
               </g>
@@ -1264,26 +1319,8 @@ function MapEditor({ mapId, mapTitle, onBack }) {
               })}
             </div>
             {pendingShape && (
-              <div style={{background:'rgba(245,193,108,.1)',border:'1px solid rgba(245,193,108,.3)',borderRadius:8,padding:'8px',marginBottom:8}}>
-                <div style={{fontSize:11,color:'#F5C16C',marginBottom:6,fontWeight:600}}>
-                  {SHAPE_LIST.find(s=>s.key===pendingShape)?.label} — aplicar onde?
-                </div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4}}>
-                  <button style={{...S.panelBtn(false),fontSize:10,padding:'5px 3px'}}
-                    onClick={()=>{snap();upd(sel,{shape:pendingShape});setPendingShape(null)}}>
-                    Este nó
-                  </button>
-                  <button style={{...S.panelBtn(false),fontSize:10,padding:'5px 3px'}}
-                    onClick={()=>{setDefaultShape(pendingShape);setPendingShape(null)}}>
-                    Próximos nós
-                  </button>
-                  <button style={{...S.panelBtn(false),fontSize:10,padding:'5px 3px',gridColumn:'1/-1',
-                    background:'rgba(77,212,193,.1)',borderColor:'rgba(77,212,193,.3)',color:'#4DD4C1'}}
-                    onClick={()=>{snap();upd(sel,{shape:pendingShape});setDefaultShape(pendingShape);setPendingShape(null)}}>
-                    Ambos (nó + padrão)
-                  </button>
-                </div>
-              </div>
+              // Modal é exibido centralmente — ver abaixo
+              null
             )}
 
             <button style={{...S.panelBtn(false),width:'100%',marginBottom:8,
@@ -1384,6 +1421,76 @@ function MapEditor({ mapId, mapTitle, onBack }) {
             background:'rgba(77,212,193,.9)',color:'#000',padding:'9px 22px',
             borderRadius:22,fontWeight:700,fontSize:13,whiteSpace:'nowrap'}}>
             𝕋 Clique em qualquer lugar do canvas para adicionar texto &nbsp;·&nbsp; ESC para cancelar
+          </div>
+        )}
+
+        {/* ── Modal de alterar forma ───────────────── */}
+        {pendingShape && sn && (
+          <div onClick={()=>setPendingShape(null)}
+            style={{position:'fixed',inset:0,zIndex:99998,
+              background:'rgba(0,0,0,.75)',display:'flex',alignItems:'center',
+              justifyContent:'center',backdropFilter:'blur(5px)'}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{background:'rgba(12,12,24,.98)',border:'1px solid rgba(255,255,255,.12)',
+                borderRadius:18,padding:28,width:340,color:'#fff',
+                boxShadow:'0 20px 60px rgba(0,0,0,.7)'}}>
+              <div style={{fontWeight:700,fontSize:16,color:'#4DD4C1',marginBottom:6}}>
+                🔷 Alterar forma
+              </div>
+              <div style={{color:'rgba(255,255,255,.5)',fontSize:13,marginBottom:18}}>
+                Forma selecionada: <b style={{color:'#F5C16C'}}>{SHAPE_LIST.find(s=>s.key===pendingShape)?.label}</b>
+              </div>
+              {/* Preview da forma */}
+              <div style={{display:'flex',justifyContent:'center',marginBottom:22}}>
+                <svg width={90} height={56} style={{overflow:'visible'}}>
+                  <NodeShape shape={pendingShape} w={90} h={56} fill={sn.bg}
+                    stroke="rgba(255,255,255,.4)" strokeWidth={2}/>
+                </svg>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                <button
+                  onClick={()=>{snap();upd(sel,{shape:pendingShape});setPendingShape(null)}}
+                  style={{padding:'13px',background:'rgba(77,212,193,.12)',color:'#4DD4C1',
+                    border:'1px solid rgba(77,212,193,.4)',borderRadius:10,cursor:'pointer',
+                    fontSize:13,fontFamily:'Poppins,sans-serif',fontWeight:600,textAlign:'left'}}>
+                  ✏️ Alterar apenas este nó
+                  <div style={{fontSize:11,fontWeight:400,color:'rgba(77,212,193,.7)',marginTop:2}}>
+                    "{sn.text.length>30?sn.text.slice(0,28)+'…':sn.text}"
+                  </div>
+                </button>
+                <button
+                  onClick={()=>{
+                    snap()
+                    setNd(n=>{
+                      const nn={...n}
+                      Object.keys(nn).forEach(id=>{nn[id]={...nn[id],shape:pendingShape}})
+                      return nn
+                    })
+                    setDefaultShape(pendingShape)
+                    setPendingShape(null)
+                  }}
+                  style={{padding:'13px',background:'rgba(245,193,108,.1)',color:'#F5C16C',
+                    border:'1px solid rgba(245,193,108,.35)',borderRadius:10,cursor:'pointer',
+                    fontSize:13,fontFamily:'Poppins,sans-serif',fontWeight:600,textAlign:'left'}}>
+                  🌐 Alterar TODOS os nós do mapa
+                  <div style={{fontSize:11,fontWeight:400,color:'rgba(245,193,108,.7)',marginTop:2}}>
+                    {Object.keys(nd).length} nó{Object.keys(nd).length!==1?'s':''} serão alterados
+                  </div>
+                </button>
+                <button
+                  onClick={()=>{setDefaultShape(pendingShape);setPendingShape(null)}}
+                  style={{padding:'11px',background:'rgba(255,255,255,.05)',color:'rgba(255,255,255,.6)',
+                    border:'1px solid rgba(255,255,255,.1)',borderRadius:10,cursor:'pointer',
+                    fontSize:12,fontFamily:'Poppins,sans-serif'}}>
+                  📌 Apenas definir como padrão para novos nós
+                </button>
+                <button onClick={()=>setPendingShape(null)}
+                  style={{padding:'8px',background:'transparent',color:'rgba(255,255,255,.35)',
+                    border:'none',cursor:'pointer',fontSize:12,fontFamily:'Poppins,sans-serif'}}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
