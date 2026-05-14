@@ -388,12 +388,14 @@ function MapEditor({ mapId, mapTitle, onBack }) {
   const [dragLabel, setDragLabel] = useState(null)       // {id,ox,oy,sx,sy}
   const [selFreeLine, setSelFreeLine] = useState(null)
   const [drawColor, setDrawColor] = useState('#ffffff')
+  const [labelEditText, setLabelEditText] = useState('')
 
-  const svgRef    = useRef(null)
-  const editRef   = useRef(null)
-  const saveTimer = useRef(null)
-  const titleRef  = useRef(mapTitle)
-  const imgInputRef = useRef(null)
+  const svgRef         = useRef(null)
+  const editRef        = useRef(null)
+  const saveTimer      = useRef(null)
+  const titleRef       = useRef(mapTitle)
+  const imgInputRef    = useRef(null)
+  const labelEditRef   = useRef(null)
 
   // ── Carregar mapa ────────────────────────────────────
   useEffect(() => {
@@ -532,6 +534,20 @@ function MapEditor({ mapId, mapTitle, onBack }) {
       editRef.current.select()
     }
   }, [edit])
+
+  // Foca o input de label quando entra em modo de edição
+  useEffect(() => {
+    if (editLabel) {
+      const lb = labels.find(l => l.id === editLabel)
+      if (lb) setLabelEditText(lb.text)
+      setTimeout(() => {
+        if (labelEditRef.current) {
+          labelEditRef.current.focus()
+          labelEditRef.current.select()
+        }
+      }, 30)
+    }
+  }, [editLabel])
 
   // ── Converter coordenadas cliente → mundo ────────────
   const clientToWorld = (cx, cy) => {
@@ -949,50 +965,33 @@ function MapEditor({ mapId, mapTitle, onBack }) {
             {/* Labels / textos livres */}
             {labels.map(lb=>(
               <g key={lb.id} transform={`translate(${lb.x},${lb.y})`}
-                style={{cursor:'move'}}
+                style={{cursor: editLabel===lb.id ? 'text' : 'move'}}
                 onMouseDown={e=>{
+                  if (editLabel===lb.id) return
                   e.stopPropagation()
-                  setSelLabel(lb.id); setSel(null)
+                  setSelLabel(lb.id); setSel(null); setSelEdge(null)
                   setDragLabel({id:lb.id,ox:lb.x,oy:lb.y,sx:e.clientX,sy:e.clientY})
                 }}
-                onDoubleClick={e=>{e.stopPropagation();setEditLabel(lb.id)}}
+                onDoubleClick={e=>{
+                  e.stopPropagation()
+                  setSelLabel(lb.id)
+                  setEditLabel(lb.id)
+                }}
               >
-                {editLabel===lb.id
-                  ? <foreignObject x={-120} y={-lb.fs*0.7} width={260} height={lb.fs*2}>
-                      <input xmlns="http://www.w3.org/1999/xhtml"
-                        style={{width:'100%',border:'none',outline:'2px solid #4DD4C1',
-                          background:'rgba(10,10,20,.9)',color:lb.color,fontSize:lb.fs,
-                          fontFamily:lb.ff,fontWeight:600,textAlign:'center',padding:'2px 6px',
-                          borderRadius:4}}
-                        defaultValue={lb.text}
-                        autoFocus
-                        onBlur={e=>{
-                          snap()
-                          setLabels(ls=>ls.map(l=>l.id===lb.id?{...l,text:e.target.value||l.text}:l))
-                          setEditLabel(null)
-                        }}
-                        onKeyDown={e=>{
-                          if(e.key==='Enter'||e.key==='Escape'){
-                            snap()
-                            setLabels(ls=>ls.map(l=>l.id===lb.id?{...l,text:e.target.value||l.text}:l))
-                            setEditLabel(null)
-                          }
-                          e.stopPropagation()
-                        }}
-                        onClick={e=>e.stopPropagation()}
-                      />
-                    </foreignObject>
-                  : <>
-                      {selLabel===lb.id && <rect x={-8} y={-lb.fs-4} width={lb.text.length*lb.fs*.6+16}
-                        height={lb.fs+12} rx={4} fill="none"
-                        stroke="rgba(255,255,255,.3)" strokeWidth={1} strokeDasharray="4 2"/>}
-                      <text textAnchor="start" dominantBaseline="middle" y={0}
-                        fill={lb.color} fontSize={lb.fs} fontFamily={lb.ff} fontWeight={600}
-                        style={{userSelect:'none',pointerEvents:'none'}}>
-                        {lb.text}
-                      </text>
-                    </>
-                }
+                {selLabel===lb.id && editLabel!==lb.id && (
+                  <rect
+                    x={-6} y={-lb.fs*0.85}
+                    width={lb.text.length*lb.fs*0.62+12}
+                    height={lb.fs*1.4}
+                    rx={4} fill="none"
+                    stroke="rgba(77,212,193,.6)" strokeWidth={1.5} strokeDasharray="4 2"/>
+                )}
+                <text textAnchor="start" dominantBaseline="auto" y={0}
+                  fill={editLabel===lb.id?'rgba(255,255,255,.3)':lb.color}
+                  fontSize={lb.fs} fontFamily={lb.ff} fontWeight={600}
+                  style={{userSelect:'none',pointerEvents:'none'}}>
+                  {lb.text}
+                </text>
               </g>
             ))}
             {Object.values(nd).filter(n=>visibleIds.has(n.id)).map(n=>{
@@ -1168,6 +1167,43 @@ function MapEditor({ mapId, mapTitle, onBack }) {
             </div>
           )
         })()}
+        {/* ── Input flutuante para editar texto livre ── */}
+        {editLabel && (() => {
+          const lb = labels.find(l=>l.id===editLabel)
+          if (!lb || !svgRef.current) return null
+          const r = svgRef.current.getBoundingClientRect()
+          const sx = r.left + vp.x + lb.x * vp.s
+          const sy = r.top  + vp.y + lb.y * vp.s
+          const finishLabelEdit = () => {
+            snap()
+            setLabels(ls=>ls.map(l=>l.id===editLabel?{...l,text:labelEditText||l.text}:l))
+            setEditLabel(null)
+          }
+          return (
+            <div style={{position:'fixed',left:sx-6,top:sy-lb.fs*vp.s*0.95,
+              zIndex:99999,pointerEvents:'all'}}>
+              <input
+                ref={labelEditRef}
+                value={labelEditText}
+                onChange={e=>setLabelEditText(e.target.value)}
+                onBlur={finishLabelEdit}
+                onKeyDown={e=>{
+                  if(e.key==='Enter'||e.key==='Escape') finishLabelEdit()
+                  e.stopPropagation()
+                }}
+                onClick={e=>e.stopPropagation()}
+                style={{background:'rgba(8,8,20,.95)',color:lb.color,
+                  fontSize:lb.fs*vp.s,fontFamily:lb.ff,fontWeight:700,
+                  border:'2px solid #4DD4C1',borderRadius:6,padding:'3px 10px',
+                  outline:'none',minWidth:80,boxShadow:'0 4px 20px rgba(0,0,0,.6)'}}
+              />
+              <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:2,textAlign:'center'}}>
+                Enter ou clique fora para confirmar
+              </div>
+            </div>
+          )
+        })()}
+
         {selLabel && !sn && (() => {
           const lb = labels.find(l=>l.id===selLabel)
           if (!lb) return null
@@ -1180,8 +1216,15 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                 𝕋 Texto livre
               </div>
               <PL>Texto</PL>
-              <input style={S.panelInput} value={lb.text}
-                onChange={e=>setLabels(ls=>ls.map(l=>l.id===selLabel?{...l,text:e.target.value}:l))}/>
+              <div style={{display:'flex',gap:5,marginBottom:7}}>
+                <input style={{...S.panelInput,flex:1,marginBottom:0}} value={lb.text}
+                  onChange={e=>setLabels(ls=>ls.map(l=>l.id===selLabel?{...l,text:e.target.value}:l))}/>
+                <button style={{...S.panelBtn(false),padding:'5px 8px',flexShrink:0,
+                  background:'rgba(77,212,193,.15)',color:'#4DD4C1',borderColor:'rgba(77,212,193,.4)'}}
+                  onClick={()=>setEditLabel(selLabel)} title="Editar diretamente no canvas">
+                  ✏️
+                </button>
+              </div>
               <PL>Tamanho: {lb.fs}px</PL>
               <input type="range" min="10" max="80" value={lb.fs}
                 onChange={e=>setLabels(ls=>ls.map(l=>l.id===selLabel?{...l,fs:+e.target.value}:l))}
