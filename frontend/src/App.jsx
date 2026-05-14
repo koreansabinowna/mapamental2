@@ -978,18 +978,21 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                   setEditLabel(lb.id)
                 }}
               >
-                {selLabel===lb.id && editLabel!==lb.id && (
-                  <rect
-                    x={-6} y={-lb.fs*0.85}
-                    width={lb.text.length*lb.fs*0.62+12}
-                    height={lb.fs*1.4}
-                    rx={4} fill="none"
-                    stroke="rgba(77,212,193,.6)" strokeWidth={1.5} strokeDasharray="4 2"/>
-                )}
+                {/* Rect invisível — área clicável */}
+                <rect
+                  x={-6} y={-lb.fs*0.9}
+                  width={Math.max(60, lb.text.length*lb.fs*0.62+12)}
+                  height={lb.fs*1.5}
+                  rx={4}
+                  fill={selLabel===lb.id ? 'rgba(77,212,193,.08)' : 'transparent'}
+                  stroke={selLabel===lb.id && editLabel!==lb.id ? 'rgba(77,212,193,.6)' : 'none'}
+                  strokeWidth={1.5}
+                  strokeDasharray={selLabel===lb.id ? '4 2' : ''}
+                />
                 <text textAnchor="start" dominantBaseline="auto" y={0}
-                  fill={editLabel===lb.id?'rgba(255,255,255,.3)':lb.color}
+                  fill={editLabel===lb.id ? 'rgba(255,255,255,.25)' : lb.color}
                   fontSize={lb.fs} fontFamily={lb.ff} fontWeight={600}
-                  style={{userSelect:'none',pointerEvents:'none'}}>
+                  style={{userSelect:'none', pointerEvents:'none'}}>
                   {lb.text}
                 </text>
               </g>
