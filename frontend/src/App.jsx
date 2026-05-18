@@ -1053,19 +1053,23 @@ function MapEditor({ mapId, mapTitle, onBack }) {
                 {n.nt && <text x={n.lk?n.w-19:n.w-7} y="11" fontSize="10" style={{pointerEvents:'none'}}>💬</text>}
                 {/* Botão collapse/expand (só se tem filhos) */}
                 {n.ch?.length > 0 && (
-                  <g transform={`translate(${n.w+2},${totalH(n)/2})`}
+                  <g transform={`translate(${n.w+22},${totalH(n)/2})`}
                     onClick={e=>{e.stopPropagation(); snap(); upd(n.id,{collapsed:!n.collapsed})}}
                     style={{cursor:'pointer'}}>
-                    <circle r={9} fill={n.collapsed?'#4DD4C1':'rgba(30,30,50,.85)'}
-                      stroke={n.collapsed?'white':'rgba(255,255,255,.5)'} strokeWidth={1.5}/>
+                    {/* Linha conectora do nó ao botão */}
+                    <line x1={-22} y1={0} x2={-12} y2={0}
+                      stroke="rgba(255,255,255,.25)" strokeWidth={1.5} strokeDasharray="3 2"
+                      style={{pointerEvents:'none'}}/>
+                    <circle r={10} fill={n.collapsed?'#4DD4C1':'rgba(20,20,40,.9)'}
+                      stroke={n.collapsed?'white':'rgba(255,255,255,.4)'} strokeWidth={1.5}/>
                     <text textAnchor="middle" dominantBaseline="central"
-                      fill="white" fontSize={13} fontWeight="bold"
+                      fill="white" fontSize={14} fontWeight="bold"
                       style={{pointerEvents:'none',userSelect:'none'}}>
                       {n.collapsed?'+':'−'}
                     </text>
                     {/* Contador de filhos ocultos */}
                     {n.collapsed && (
-                      <text x={13} y={1} textAnchor="start" dominantBaseline="central"
+                      <text x={14} y={1} textAnchor="start" dominantBaseline="central"
                         fill="rgba(255,255,255,.5)" fontSize={10}
                         style={{pointerEvents:'none',userSelect:'none'}}>
                         {n.ch.length}
